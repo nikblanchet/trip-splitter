@@ -155,14 +155,19 @@ export default function SplitEditor({
     )
   }
 
+  // Fixed column widths (in pixels)
+  const RATIO_WIDTH = 48 // fits "999"
+  const AMOUNT_WIDTH = 80 // fits "9999.99"
+  const BUTTON_WIDTH = 32
+
   return (
-    <div className="w-full space-y-2">
+    <div className="max-w-full overflow-hidden space-y-2">
       {/* Header row */}
-      <div className="flex items-center gap-3 text-xs font-medium text-gray-500">
+      <div className="flex items-center gap-2 text-xs font-medium text-gray-500">
         <div className="flex-1 min-w-0">Person</div>
-        <div className="w-16 text-center">Ratio</div>
-        <div className="w-24 text-right">{currency}</div>
-        <div className="w-8"></div>
+        <div style={{ width: RATIO_WIDTH }} className="text-center flex-shrink-0">Ratio</div>
+        <div style={{ width: AMOUNT_WIDTH }} className="text-right flex-shrink-0">{currency}</div>
+        <div style={{ width: BUTTON_WIDTH }} className="flex-shrink-0"></div>
       </div>
 
       {/* Data rows */}
@@ -173,24 +178,25 @@ export default function SplitEditor({
         return (
           <div
             key={assignment.participant_id}
-            className="flex items-center gap-3"
+            className="flex items-center gap-2"
           >
-            {/* Person name */}
-            <div className="flex-1 min-w-0 text-sm text-gray-900 truncate">
+            {/* Person name - flexible width, text wraps */}
+            <div className="flex-1 min-w-0 text-sm text-gray-900 break-words">
               {assignment.participant.primary_alias}
             </div>
 
-            {/* Ratio input */}
+            {/* Ratio input - fixed width */}
             <input
               type="number"
               min="1"
               value={assignment.shares}
               onChange={(e) => handleRatioChange(assignment.participant_id, e.target.value)}
               disabled={disabled}
-              className="w-16 text-center border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              style={{ width: RATIO_WIDTH }}
+              className="flex-shrink-0 text-center border border-gray-300 rounded px-1 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
             />
 
-            {/* Amount input */}
+            {/* Amount input - fixed width */}
             <input
               type="number"
               step="0.01"
@@ -198,15 +204,17 @@ export default function SplitEditor({
               onChange={(e) => handleAmountInput(assignment.participant_id, e.target.value)}
               onBlur={() => handleAmountBlur(assignment.participant_id)}
               disabled={disabled}
-              className="w-24 text-right border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              style={{ width: AMOUNT_WIDTH }}
+              className="flex-shrink-0 text-right border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
             />
 
-            {/* Remove button */}
+            {/* Remove button - fixed width */}
             {!disabled ? (
               <button
                 type="button"
                 onClick={() => onRemove(assignment.participant_id)}
-                className="w-8 h-8 text-red-400 hover:text-red-600 flex items-center justify-center"
+                style={{ width: BUTTON_WIDTH }}
+                className="flex-shrink-0 h-8 text-red-400 hover:text-red-600 flex items-center justify-center"
                 title="Remove"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -214,7 +222,7 @@ export default function SplitEditor({
                 </svg>
               </button>
             ) : (
-              <div className="w-8"></div>
+              <div style={{ width: BUTTON_WIDTH }} className="flex-shrink-0"></div>
             )}
           </div>
         )
