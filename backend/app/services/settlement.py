@@ -26,6 +26,7 @@ async def fetch_trip_data(trip_id: str) -> dict:
         - line_items: list of line item records
         - item_assignments: list of assignment records
         - direct_payments: list of direct payment records
+        - receipt_payments: list of receipt payment records (multi-payer support)
     """
     settings = get_settings()
     headers = await get_supabase_headers()
@@ -51,6 +52,7 @@ async def fetch_trip_data(trip_id: str) -> dict:
 
         line_items = []
         item_assignments = []
+        receipt_payments = []
 
         if receipt_ids:
             # Fetch line items for these receipts
@@ -74,6 +76,18 @@ async def fetch_trip_data(trip_id: str) -> dict:
                 )
                 item_assignments = assignments_resp.json() if assignments_resp.status_code == 200 else []
 
+            # Fetch receipt payments (multi-payer support)
+            receipt_payments_resp = await client.get(
+                f"{base_url}/rest/v1/receipt_payments",
+                headers=headers,
+                params={
+                    "receipt_id": f"in.({receipt_filter})",
+                    "deleted_at": "is.null",
+                    "select": "*",
+                },
+            )
+            receipt_payments = receipt_payments_resp.json() if receipt_payments_resp.status_code == 200 else []
+
         # Fetch direct payments for this trip
         payments_resp = await client.get(
             f"{base_url}/rest/v1/direct_payments",
@@ -88,6 +102,7 @@ async def fetch_trip_data(trip_id: str) -> dict:
             "line_items": line_items,
             "item_assignments": item_assignments,
             "direct_payments": direct_payments,
+            "receipt_payments": receipt_payments,
         }
 
 
@@ -111,6 +126,7 @@ async def calculate_balances(trip_id: str) -> dict[str, float]:
     line_items = data["line_items"]
     item_assignments = data["item_assignments"]
     direct_payments = data["direct_payments"]
+    receipt_payments = data["receipt_payments"]
 
     # Initialize balances for all participants
     balances: dict[str, Decimal] = {p["id"]: Decimal("0") for p in participants}
@@ -119,12 +135,31 @@ async def calculate_balances(trip_id: str) -> dict[str, float]:
     receipt_map = {r["id"]: r for r in receipts}
     line_item_map = {li["id"]: li for li in line_items}
 
-    # Process receipts: payer gets credit for what they paid
+    # Build lookup: receipt_id -> list of payments (multi-payer support)
+    payments_by_receipt: dict[str, list[dict]] = {}
+    for payment in receipt_payments:
+        rid = payment.get("receipt_id")
+        if rid:
+            payments_by_receipt.setdefault(rid, []).append(payment)
+
+    # Process receipts: payers get credit for what they paid
     for receipt in receipts:
-        payer_id = receipt.get("paid_by_participant_id")
-        if payer_id and payer_id in balances:
-            total = Decimal(str(receipt.get("total_amount", 0)))
-            balances[payer_id] += total
+        receipt_id = receipt.get("id")
+        payments = payments_by_receipt.get(receipt_id, [])
+
+        if payments:
+            # Multi-payer: credit each payer for their contribution
+            for payment in payments:
+                payer_id = payment.get("participant_id")
+                amount = Decimal(str(payment.get("amount", 0)))
+                if payer_id in balances:
+                    balances[payer_id] += amount
+        else:
+            # Legacy fallback: single payer from receipts table
+            payer_id = receipt.get("payer_participant_id")
+            if payer_id and payer_id in balances:
+                total = Decimal(str(receipt.get("total", 0)))
+                balances[payer_id] += total
 
     # Process item assignments: assignees owe their share
     for assignment in item_assignments:

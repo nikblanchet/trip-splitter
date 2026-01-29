@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { parseReceipt } from '../lib/api'
 import { supabase } from '../lib/supabase'
-import ParticipantPicker from '../components/ParticipantPicker'
+import MultiPayerPicker, { type PayerPayment } from '../components/MultiPayerPicker'
 import Spinner from '../components/Spinner'
 
 interface ParsedLineItem {
@@ -50,7 +50,7 @@ export default function AddReceipt() {
   const [subtotalCents, setSubtotalCents] = useState(0)
   const [totalCents, setTotalCents] = useState(0)
   const [tipCents, setTipCents] = useState(0)
-  const [payerId, setPayerId] = useState<string | null>(null)
+  const [payers, setPayers] = useState<PayerPayment[]>([])
   const [payerError, setPayerError] = useState<string | null>(null)
 
   // Load trip UUID on mount
@@ -187,6 +187,19 @@ export default function AddReceipt() {
       return
     }
 
+    // Validate payers
+    const effectiveTotal = totalCents || calculateTotal()
+    if (payers.length === 0) {
+      setPayerError('Please select at least one payer')
+      return
+    }
+
+    const payersSum = payers.reduce((sum, p) => sum + p.amount, 0)
+    if (Math.abs(payersSum - effectiveTotal) > 1) {
+      setPayerError(`Payment amounts (${(payersSum / 100).toFixed(2)}) must equal the receipt total (${(effectiveTotal / 100).toFixed(2)})`)
+      return
+    }
+
     setSaving(true)
     setError(null)
 
@@ -209,17 +222,17 @@ export default function AddReceipt() {
         }
       }
 
-      // Insert receipt
+      // Insert receipt (payer_participant_id is now nullable, we use receipt_payments instead)
       const { data: receipt, error: receiptError } = await supabase
         .from('receipts')
         .insert({
           trip_id: tripUuid,
-          payer_participant_id: payerId || null,
+          payer_participant_id: null,
           vendor_name: vendorName || null,
           receipt_date: receiptDate || null,
           receipt_currency: currency,
           subtotal: (subtotalCents || calculateSubtotal()) / 100,
-          total: (totalCents || calculateTotal()) / 100,
+          total: effectiveTotal / 100,
           tip_amount: tipCents ? tipCents / 100 : null,
           image_url: imageUrl,
         })
@@ -228,6 +241,21 @@ export default function AddReceipt() {
 
       if (receiptError) {
         throw receiptError
+      }
+
+      // Insert receipt payments (multi-payer support)
+      const paymentsToInsert = payers.map((p) => ({
+        receipt_id: receipt.id,
+        participant_id: p.participantId,
+        amount: p.amount / 100,
+      }))
+
+      const { error: paymentsError } = await supabase
+        .from('receipt_payments')
+        .insert(paymentsToInsert)
+
+      if (paymentsError) {
+        console.error('Receipt payments error:', paymentsError)
       }
 
       // Insert line items (database only allows: food, alcohol, other)
@@ -417,27 +445,26 @@ export default function AddReceipt() {
             </select>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Paid By
-            </label>
-            {tripId && (
-              <div>
-                <ParticipantPicker
-                  tripId={tripId}
-                  selectedParticipantIds={payerId ? [payerId] : []}
-                  onChange={(ids) => {
-                    setPayerId(ids[0] || null)
-                    if (ids[0]) setPayerError(null)
-                  }}
-                  placeholder="Select who paid..."
-                />
-                {payerError && (
-                  <p className="mt-1 text-sm text-red-600">{payerError}</p>
-                )}
-              </div>
-            )}
-          </div>
+        </div>
+
+        {/* Paid By - Multi-payer support */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Paid By
+          </label>
+          {tripId && (
+            <MultiPayerPicker
+              tripId={tripId}
+              payments={payers}
+              totalCents={totalCents || calculateTotal()}
+              currency={currency}
+              onChange={(newPayers) => {
+                setPayers(newPayers)
+                if (newPayers.length > 0) setPayerError(null)
+              }}
+              error={payerError}
+            />
+          )}
         </div>
 
         {/* Line Items */}

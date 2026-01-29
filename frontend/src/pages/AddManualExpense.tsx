@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import ParticipantPicker from '../components/ParticipantPicker'
+import MultiPayerPicker, { type PayerPayment } from '../components/MultiPayerPicker'
 import Spinner from '../components/Spinner'
 
 interface LineItem {
@@ -40,7 +40,7 @@ export default function AddManualExpense() {
     { description: '', unit_price_cents: 0, quantity: 1, category: null },
   ])
   const [tipCents, setTipCents] = useState(0)
-  const [payerId, setPayerId] = useState<string | null>(null)
+  const [payers, setPayers] = useState<PayerPayment[]>([])
   const [payerError, setPayerError] = useState<string | null>(null)
   const [notes, setNotes] = useState('')
 
@@ -105,10 +105,17 @@ export default function AddManualExpense() {
       return
     }
 
-    // Validate payer
-    if (!payerId) {
+    // Validate payers
+    const effectiveTotal = calculateTotal()
+    if (payers.length === 0) {
       setPayerError('Please select who paid for this expense')
       setError('Please select who paid for this expense')
+      return
+    }
+
+    const payersSum = payers.reduce((sum, p) => sum + p.amount, 0)
+    if (Math.abs(payersSum - effectiveTotal) > 1) {
+      setPayerError(`Payment amounts (${(payersSum / 100).toFixed(2)}) must equal the total (${(effectiveTotal / 100).toFixed(2)})`)
       return
     }
     setPayerError(null)
@@ -127,11 +134,12 @@ export default function AddManualExpense() {
 
       // Insert receipt (expense)
       // Database uses DECIMAL for amounts, not cents - convert from cents to dollars
+      // payer_participant_id is now nullable, we use receipt_payments instead
       const { data: receipt, error: receiptError } = await supabase
         .from('receipts')
         .insert({
           trip_id: tripUuid,
-          payer_participant_id: payerId,
+          payer_participant_id: null,
           vendor_name: vendorName || null,
           receipt_date: receiptDate || null,
           receipt_currency: currency,
@@ -145,6 +153,21 @@ export default function AddManualExpense() {
 
       if (receiptError) {
         throw receiptError
+      }
+
+      // Insert receipt payments (multi-payer support)
+      const paymentsToInsert = payers.map((p) => ({
+        receipt_id: receipt.id,
+        participant_id: p.participantId,
+        amount: p.amount / 100,
+      }))
+
+      const { error: paymentsError } = await supabase
+        .from('receipt_payments')
+        .insert(paymentsToInsert)
+
+      if (paymentsError) {
+        console.error('Receipt payments error:', paymentsError)
       }
 
       // Insert line items
@@ -236,27 +259,26 @@ export default function AddManualExpense() {
             </select>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Paid By <span className="text-red-500">*</span>
-            </label>
-            {tripId && (
-              <div>
-                <ParticipantPicker
-                  tripId={tripId}
-                  selectedParticipantIds={payerId ? [payerId] : []}
-                  onChange={(ids) => {
-                    setPayerId(ids[0] || null)
-                    if (ids[0]) setPayerError(null)
-                  }}
-                  placeholder="Select who paid..."
-                />
-                {payerError && (
-                  <p className="mt-1 text-sm text-red-600">{payerError}</p>
-                )}
-              </div>
-            )}
-          </div>
+        </div>
+
+        {/* Paid By - Multi-payer support */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            Paid By <span className="text-red-500">*</span>
+          </label>
+          {tripId && (
+            <MultiPayerPicker
+              tripId={tripId}
+              payments={payers}
+              totalCents={calculateTotal()}
+              currency={currency}
+              onChange={(newPayers) => {
+                setPayers(newPayers)
+                if (newPayers.length > 0) setPayerError(null)
+              }}
+              error={payerError}
+            />
+          )}
         </div>
 
         {/* Line Items */}

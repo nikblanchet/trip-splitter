@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { calculatePerPersonBreakdown } from '../lib/calculations'
 import LineItemCard from '../components/LineItemCard'
-import ParticipantPicker from '../components/ParticipantPicker'
+import MultiPayerPicker, { type PayerPayment } from '../components/MultiPayerPicker'
 import Spinner from '../components/Spinner'
 
 interface ParticipantAlias {
@@ -14,6 +14,13 @@ interface ParticipantAlias {
 interface Participant {
   id: string
   participant_aliases: ParticipantAlias[]
+}
+
+interface ReceiptPayment {
+  id: string
+  participant_id: string
+  amount: number
+  participant: Participant
 }
 
 interface Assignment {
@@ -50,7 +57,8 @@ interface Receipt {
   total_cents: number | null
   tip_cents: number | null
   image_url: string | null
-  payer: Participant | null
+  payer: Participant | null // Legacy single payer (fallback)
+  payments: ReceiptPayment[] // New multi-payer data
   line_items: LineItem[]
   tax_lines: TaxLine[]
 }
@@ -65,8 +73,9 @@ export default function ReceiptDetail() {
   const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [showImage, setShowImage] = useState(false)
-  const [editingPayer, setEditingPayer] = useState(false)
-  const [selectedPayerId, setSelectedPayerId] = useState<string | null>(null)
+  const [editingPayers, setEditingPayers] = useState(false)
+  const [editPayments, setEditPayments] = useState<PayerPayment[]>([])
+  const [payerError, setPayerError] = useState<string | null>(null)
 
   const fetchReceipt = useCallback(async () => {
     if (!tripId || !receiptId) return
@@ -95,6 +104,18 @@ export default function ReceiptDetail() {
       if (fetchError) {
         setError('Unable to load receipt. Please try again.')
       } else if (data) {
+        // Fetch receipt payments separately (multi-payer support)
+        const { data: paymentsData } = await supabase
+          .from('receipt_payments')
+          .select(`
+            id,
+            participant_id,
+            amount,
+            participant:participants(id, participant_aliases(alias, is_primary))
+          `)
+          .eq('receipt_id', receiptId)
+          .is('deleted_at', null)
+
         // Transform database columns to UI format
         const transformed: Receipt = {
           id: data.id,
@@ -105,7 +126,13 @@ export default function ReceiptDetail() {
           total_cents: data.total ? Math.round(data.total * 100) : null,
           tip_cents: data.tip_amount ? Math.round(data.tip_amount * 100) : null,
           image_url: data.image_url,
-          payer: data.payer,
+          payer: data.payer, // Legacy fallback
+          payments: (paymentsData || []).map((p: { id: string; participant_id: string; amount: number; participant: Participant | Participant[] }) => ({
+            id: p.id,
+            participant_id: p.participant_id,
+            amount: p.amount,
+            participant: Array.isArray(p.participant) ? p.participant[0] : p.participant,
+          })),
           line_items: (data.line_items || []).map((item: { id: string; description: string; amount: number; category: string | null; assignments: Assignment[] }) => ({
             id: item.id,
             description: item.description,
@@ -218,30 +245,96 @@ export default function ReceiptDetail() {
     setIsSaving(false)
   }
 
-  const handlePayerUpdate = async (payerId: string) => {
+  const handlePayersUpdate = async () => {
     if (!receipt) return
 
+    // Validate
+    const effectiveTotal = receipt.total_cents || 0
+    if (editPayments.length === 0) {
+      setPayerError('Please select at least one payer')
+      return
+    }
+
+    const payersSum = editPayments.reduce((sum, p) => sum + p.amount, 0)
+    if (Math.abs(payersSum - effectiveTotal) > 1) {
+      setPayerError(`Payment amounts (${(payersSum / 100).toFixed(2)}) must equal the total (${(effectiveTotal / 100).toFixed(2)})`)
+      return
+    }
+
     setIsSaving(true)
+    setPayerError(null)
 
     try {
-      const { error: updateError } = await supabase
-        .from('receipts')
-        .update({ payer_participant_id: payerId })
-        .eq('id', receipt.id)
+      // Delete existing payments for this receipt
+      await supabase
+        .from('receipt_payments')
+        .delete()
+        .eq('receipt_id', receipt.id)
 
-      if (updateError) {
-        console.error('Failed to update payer:', updateError)
-        setError('Failed to update payer. Please try again.')
+      // Insert new payments
+      const paymentsToInsert = editPayments.map((p) => ({
+        receipt_id: receipt.id,
+        participant_id: p.participantId,
+        amount: p.amount / 100,
+      }))
+
+      const { error: insertError } = await supabase
+        .from('receipt_payments')
+        .insert(paymentsToInsert)
+
+      if (insertError) {
+        console.error('Failed to update payers:', insertError)
+        setError('Failed to update payers. Please try again.')
       } else {
         await fetchReceipt()
-        setEditingPayer(false)
-        setSelectedPayerId(null)
+        setEditingPayers(false)
+        setEditPayments([])
       }
     } catch {
-      setError('Failed to update payer. Please try again.')
+      setError('Failed to update payers. Please try again.')
     }
 
     setIsSaving(false)
+  }
+
+  const startEditingPayers = () => {
+    if (!receipt) return
+
+    // Initialize edit state from current payments or legacy payer
+    if (receipt.payments.length > 0) {
+      setEditPayments(
+        receipt.payments.map((p) => ({
+          participantId: p.participant_id,
+          participantName: getParticipantName(p.participant),
+          amount: Math.round(p.amount * 100),
+        }))
+      )
+    } else if (receipt.payer) {
+      // Fallback to legacy single payer
+      setEditPayments([
+        {
+          participantId: receipt.payer.id,
+          participantName: getParticipantName(receipt.payer),
+          amount: receipt.total_cents || 0,
+        },
+      ])
+    } else {
+      setEditPayments([])
+    }
+    setEditingPayers(true)
+  }
+
+  const getPayersDisplay = () => {
+    if (!receipt) return 'Unknown'
+
+    if (receipt.payments.length > 0) {
+      return receipt.payments
+        .map((p) => `${getParticipantName(p.participant)} (${formatCurrency(Math.round(p.amount * 100))})`)
+        .join(', ')
+    }
+
+    // Fallback to legacy payer
+    return getParticipantName(receipt.payer)
   }
 
   if (isLoading) {
@@ -326,51 +419,7 @@ export default function ReceiptDetail() {
 
       {/* Receipt Info Card */}
       <div className="bg-white rounded-lg shadow p-4 sm:p-6">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          <div>
-            <label className="text-xs font-medium text-gray-500 uppercase">Paid By</label>
-            {editingPayer ? (
-              <div className="mt-1 space-y-2">
-                <ParticipantPicker
-                  tripId={tripId!}
-                  selectedParticipantIds={selectedPayerId ? [selectedPayerId] : (receipt.payer ? [receipt.payer.id] : [])}
-                  onChange={(ids) => setSelectedPayerId(ids[0] || null)}
-                  placeholder="Select payer..."
-                />
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => selectedPayerId && handlePayerUpdate(selectedPayerId)}
-                    disabled={!selectedPayerId || isSaving}
-                    className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {isSaving ? 'Saving...' : 'Save'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditingPayer(false)
-                      setSelectedPayerId(null)
-                    }}
-                    className="text-sm text-gray-600 hover:text-gray-800 px-3 py-1.5"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <p className="font-semibold text-gray-900">{getParticipantName(receipt.payer)}</p>
-                <button
-                  type="button"
-                  onClick={() => setEditingPayer(true)}
-                  className="text-sm text-blue-600 hover:text-blue-800"
-                >
-                  Edit
-                </button>
-              </div>
-            )}
-          </div>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-4">
           <div>
             <label className="text-xs font-medium text-gray-500 uppercase">Currency</label>
             <p className="font-semibold text-gray-900">{receipt.currency}</p>
@@ -383,6 +432,71 @@ export default function ReceiptDetail() {
             <label className="text-xs font-medium text-gray-500 uppercase">Total</label>
             <p className="font-semibold text-gray-900 text-lg">{formatCurrency(receipt.total_cents)}</p>
           </div>
+        </div>
+
+        {/* Paid By Section - Multi-payer */}
+        <div className="border-t pt-4">
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-medium text-gray-500 uppercase">Paid By</label>
+            {!editingPayers && (
+              <button
+                type="button"
+                onClick={startEditingPayers}
+                className="text-sm text-blue-600 hover:text-blue-800"
+              >
+                Edit
+              </button>
+            )}
+          </div>
+
+          {editingPayers ? (
+            <div className="space-y-3">
+              <MultiPayerPicker
+                tripId={tripId!}
+                payments={editPayments}
+                totalCents={receipt.total_cents || 0}
+                currency={receipt.currency}
+                onChange={setEditPayments}
+                error={payerError}
+              />
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handlePayersUpdate}
+                  disabled={isSaving}
+                  className="text-sm bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {isSaving ? 'Saving...' : 'Save'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingPayers(false)
+                    setEditPayments([])
+                    setPayerError(null)
+                  }}
+                  className="text-sm text-gray-600 hover:text-gray-800 px-4 py-2"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              {receipt.payments.length > 1 ? (
+                <div className="space-y-1">
+                  {receipt.payments.map((payment) => (
+                    <div key={payment.id} className="flex justify-between text-sm">
+                      <span className="font-medium text-gray-900">{getParticipantName(payment.participant)}</span>
+                      <span className="text-gray-600">{formatCurrency(Math.round(payment.amount * 100))}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="font-semibold text-gray-900">{getPayersDisplay()}</p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Receipt Image */}
@@ -555,7 +669,17 @@ export default function ReceiptDetail() {
           </div>
           <div className="sm:text-right">
             <div className="text-sm text-gray-400">Paid by</div>
-            <div className="text-lg sm:text-xl font-semibold">{getParticipantName(receipt.payer)}</div>
+            {receipt.payments.length > 1 ? (
+              <div className="space-y-1">
+                {receipt.payments.map((payment) => (
+                  <div key={payment.id} className="text-sm sm:text-base">
+                    {getParticipantName(payment.participant)} ({formatCurrency(Math.round(payment.amount * 100))})
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-lg sm:text-xl font-semibold">{getPayersDisplay()}</div>
+            )}
           </div>
         </div>
       </div>

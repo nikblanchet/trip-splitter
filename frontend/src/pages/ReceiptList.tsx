@@ -3,6 +3,21 @@ import { useParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import Spinner from '../components/Spinner'
 
+interface ParticipantAlias {
+  alias: string
+  is_primary: boolean
+}
+
+interface ReceiptPayment {
+  id: string
+  participant_id: string
+  amount: number
+  participant: {
+    id: string
+    participant_aliases: ParticipantAlias[]
+  }
+}
+
 interface Receipt {
   id: string
   vendor_name: string | null
@@ -13,8 +28,9 @@ interface Receipt {
   tip_cents: number | null
   payer: {
     id: string
-    participant_aliases: { alias: string; is_primary: boolean }[]
+    participant_aliases: ParticipantAlias[]
   }[] | null
+  payments: ReceiptPayment[]
 }
 
 export default function ReceiptList() {
@@ -65,6 +81,42 @@ export default function ReceiptList() {
       if (fetchError) {
         setError('Unable to load receipts. Please try again.')
       } else {
+        // Fetch receipt payments for all receipts (multi-payer support)
+        const receiptIds = (data || []).map((r: { id: string }) => r.id)
+        let paymentsMap: Record<string, ReceiptPayment[]> = {}
+
+        if (receiptIds.length > 0) {
+          const { data: paymentsData } = await supabase
+            .from('receipt_payments')
+            .select(`
+              id,
+              receipt_id,
+              participant_id,
+              amount,
+              participant:participants(id, participant_aliases(alias, is_primary))
+            `)
+            .in('receipt_id', receiptIds)
+            .is('deleted_at', null)
+
+          // Group payments by receipt_id
+          for (const payment of paymentsData || []) {
+            const rid = (payment as { receipt_id: string }).receipt_id
+            if (!paymentsMap[rid]) {
+              paymentsMap[rid] = []
+            }
+            // Supabase may return participant as an array for joins
+            const participant = Array.isArray(payment.participant)
+              ? payment.participant[0]
+              : payment.participant
+            paymentsMap[rid].push({
+              id: payment.id,
+              participant_id: payment.participant_id,
+              amount: payment.amount,
+              participant: participant as ReceiptPayment['participant'],
+            })
+          }
+        }
+
         // Transform database columns to UI format
         const transformed = (data || []).map((r: { id: string; vendor_name: string | null; receipt_date: string | null; receipt_currency: string; subtotal: number | null; total: number | null; tip_amount: number | null; payer: Receipt['payer'] }) => ({
           id: r.id,
@@ -75,6 +127,7 @@ export default function ReceiptList() {
           total_cents: r.total ? Math.round(r.total * 100) : null,
           tip_cents: r.tip_amount ? Math.round(r.tip_amount * 100) : null,
           payer: r.payer,
+          payments: paymentsMap[r.id] || [],
         }))
         setReceipts(transformed)
       }
@@ -106,11 +159,28 @@ export default function ReceiptList() {
     })
   }
 
-  const getPayerName = (payer: Receipt['payer']) => {
-    if (!payer || payer.length === 0) return 'Unknown'
-    const payerObj = payer[0]
-    const primaryAlias = payerObj.participant_aliases?.find((a) => a.is_primary)
-    return primaryAlias?.alias || payerObj.participant_aliases?.[0]?.alias || 'Unknown'
+  const getParticipantName = (participant: { participant_aliases: ParticipantAlias[] } | null) => {
+    if (!participant) return 'Unknown'
+    const primaryAlias = participant.participant_aliases?.find((a) => a.is_primary)
+    return primaryAlias?.alias || participant.participant_aliases?.[0]?.alias || 'Unknown'
+  }
+
+  const getPayersDisplay = (receipt: Receipt) => {
+    // Use payments if available (multi-payer)
+    if (receipt.payments.length > 0) {
+      const names = receipt.payments.map((p) => getParticipantName(p.participant))
+      if (names.length === 1) {
+        return names[0]
+      } else if (names.length === 2) {
+        return names.join(' & ')
+      } else {
+        return `${names[0]} +${names.length - 1} more`
+      }
+    }
+
+    // Fallback to legacy payer
+    if (!receipt.payer || receipt.payer.length === 0) return 'Unknown'
+    return getParticipantName(receipt.payer[0])
   }
 
   return (
@@ -208,7 +278,7 @@ export default function ReceiptList() {
                   <div className="flex flex-col sm:flex-row sm:items-center sm:gap-3 mt-1 text-sm text-gray-500">
                     <span>{formatDate(receipt.receipt_date)}</span>
                     <span className="hidden sm:inline text-gray-300">|</span>
-                    <span className="truncate">Paid by {getPayerName(receipt.payer)}</span>
+                    <span className="truncate">Paid by {getPayersDisplay(receipt)}</span>
                   </div>
                 </div>
                 <div className="text-right flex-shrink-0 ml-2">
