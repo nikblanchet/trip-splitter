@@ -157,15 +157,15 @@ export default function SplitEditor({
 
   return (
     <div className="space-y-2">
-      {/* Header */}
-      <div className="grid grid-cols-[1fr,60px,100px,24px] gap-2 text-xs font-medium text-gray-500 px-1">
-        <div>Person</div>
-        <div className="text-center">Ratio</div>
-        <div className="text-right">Amount</div>
-        <div></div>
+      {/* Header row */}
+      <div className="flex items-center gap-2 text-xs font-medium text-gray-500">
+        <div className="flex-1 min-w-0">Person</div>
+        <div className="w-12 text-center">Ratio</div>
+        <div className="w-20 text-right">Amount</div>
+        <div className="w-6"></div>
       </div>
 
-      {/* Rows */}
+      {/* Data rows */}
       {assignments.map((assignment) => {
         const amountCents = getAmountCents(assignment.shares)
         const displayAmount = editingAmounts[assignment.participant_id] ?? (amountCents / 100).toFixed(2)
@@ -173,25 +173,25 @@ export default function SplitEditor({
         return (
           <div
             key={assignment.participant_id}
-            className="grid grid-cols-[1fr,60px,100px,24px] gap-2 items-center"
+            className="flex items-center gap-2"
           >
-            {/* Person */}
-            <div className="text-sm text-gray-900 truncate">
+            {/* Person name */}
+            <div className="flex-1 min-w-0 text-sm text-gray-900 truncate">
               {assignment.participant.primary_alias}
             </div>
 
-            {/* Ratio */}
+            {/* Ratio input */}
             <input
               type="number"
               min="1"
               value={assignment.shares}
               onChange={(e) => handleRatioChange(assignment.participant_id, e.target.value)}
               disabled={disabled}
-              className="w-full text-center border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              className="w-12 text-center border border-gray-300 rounded px-1 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
             />
 
-            {/* Amount */}
-            <div className="flex items-center gap-1">
+            {/* Amount input with currency */}
+            <div className="w-20 relative">
               <input
                 type="number"
                 step="0.01"
@@ -199,34 +199,40 @@ export default function SplitEditor({
                 onChange={(e) => handleAmountInput(assignment.participant_id, e.target.value)}
                 onBlur={() => handleAmountBlur(assignment.participant_id)}
                 disabled={disabled}
-                className="w-full text-right border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+                className="w-full text-right border border-gray-300 rounded px-1 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 pr-1"
               />
-              <span className="text-xs text-gray-500 whitespace-nowrap">{currency}</span>
             </div>
 
             {/* Remove button */}
-            {!disabled && (
+            {!disabled ? (
               <button
                 type="button"
                 onClick={() => onRemove(assignment.participant_id)}
-                className="text-red-400 hover:text-red-600 p-1"
+                className="w-6 text-red-400 hover:text-red-600 flex items-center justify-center"
                 title="Remove"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
+            ) : (
+              <div className="w-6"></div>
             )}
           </div>
         )
       })}
+
+      {/* Currency label */}
+      <div className="text-xs text-gray-400 text-right pr-8">
+        {currency}
+      </div>
 
       {/* Add button */}
       {!disabled && (
         <button
           type="button"
           onClick={onAddClick}
-          className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 mt-1"
+          className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
