@@ -215,12 +215,26 @@ export default function Settlements() {
     setError(null)
 
     try {
-      await fetchParticipants()
-      await fetchTrip()
+      // First resolve invite_code to UUID
+      const { data: tripData, error: tripError } = await supabase
+        .from('trips')
+        .select('id, base_currency')
+        .eq('invite_code', tripId)
+        .single()
 
+      if (tripError || !tripData) {
+        setError('Trip not found.')
+        return
+      }
+
+      setTrip(tripData)
+
+      await fetchParticipants()
+
+      // Use trip UUID (not invite_code) for settlements API
       const [balancesData, settlementsData] = await Promise.all([
-        getBalances(tripId),
-        getSettlements(tripId),
+        getBalances(tripData.id),
+        getSettlements(tripData.id),
       ])
       setBalances(balancesData)
       setSettlements(settlementsData)
@@ -229,7 +243,7 @@ export default function Settlements() {
     } finally {
       setLoading(false)
     }
-  }, [tripId, fetchParticipants, fetchTrip])
+  }, [tripId, fetchParticipants])
 
   useEffect(() => {
     fetchData()

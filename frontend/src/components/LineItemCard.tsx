@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import AssignmentChips from './AssignmentChips'
+import SplitEditor from './SplitEditor'
 import ParticipantPicker from './ParticipantPicker'
 
 interface Participant {
@@ -181,8 +181,10 @@ export default function LineItemCard({
                   </button>
                 </div>
               ) : (
-                <AssignmentChips
+                <SplitEditor
                   assignments={assignments}
+                  itemAmountCents={totalAmount}
+                  currency={currency}
                   onRemove={handleRemoveAssignment}
                   onSharesChange={handleSharesChange}
                   onAddClick={() => setShowAssignPicker(true)}
@@ -251,8 +253,10 @@ export default function LineItemCard({
                 </button>
               </div>
             ) : (
-              <AssignmentChips
+              <SplitEditor
                 assignments={assignments}
+                itemAmountCents={totalAmount}
+                currency={currency}
                 onRemove={handleRemoveAssignment}
                 onSharesChange={handleSharesChange}
                 onAddClick={() => setShowAssignPicker(true)}
