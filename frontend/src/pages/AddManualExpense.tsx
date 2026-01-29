@@ -126,6 +126,7 @@ export default function AddManualExpense() {
       const totalCents = calculateTotal()
 
       // Insert receipt (expense)
+      // Database uses DECIMAL for amounts, not cents - convert from cents to dollars
       const { data: receipt, error: receiptError } = await supabase
         .from('receipts')
         .insert({
@@ -133,10 +134,10 @@ export default function AddManualExpense() {
           payer_participant_id: payerId,
           vendor_name: vendorName || null,
           receipt_date: receiptDate || null,
-          currency,
-          subtotal_cents: subtotalCents,
-          total_cents: totalCents,
-          tip_cents: tipCents || null,
+          receipt_currency: currency,
+          subtotal: subtotalCents / 100,
+          total: totalCents / 100,
+          tip_amount: tipCents ? tipCents / 100 : null,
           image_url: null, // Manual expense, no image
         })
         .select()
@@ -147,14 +148,17 @@ export default function AddManualExpense() {
       }
 
       // Insert line items
+      // Database uses DECIMAL 'amount' column, not unit_price_cents
+      // Database doesn't have quantity column - amount represents total line item cost
+      const validCategories = ['food', 'alcohol', 'other']
       const lineItemsToInsert = lineItems
         .filter((item) => item.description)
-        .map((item) => ({
+        .map((item, index) => ({
           receipt_id: receipt.id,
           description: item.description,
-          unit_price_cents: item.unit_price_cents,
-          quantity: item.quantity,
-          category: item.category,
+          amount: (item.unit_price_cents * item.quantity) / 100,
+          category: item.category && validCategories.includes(item.category) ? item.category : 'other',
+          sort_order: index,
         }))
 
       if (lineItemsToInsert.length > 0) {

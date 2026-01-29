@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { calculatePerPersonBreakdown } from '../lib/calculations'
 import LineItemCard from '../components/LineItemCard'
+import ParticipantPicker from '../components/ParticipantPicker'
 import Spinner from '../components/Spinner'
 
 interface ParticipantAlias {
@@ -64,6 +65,8 @@ export default function ReceiptDetail() {
   const [isEditing, setIsEditing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [showImage, setShowImage] = useState(false)
+  const [editingPayer, setEditingPayer] = useState(false)
+  const [selectedPayerId, setSelectedPayerId] = useState<string | null>(null)
 
   const fetchReceipt = useCallback(async () => {
     if (!tripId || !receiptId) return
@@ -91,8 +94,33 @@ export default function ReceiptDetail() {
 
       if (fetchError) {
         setError('Unable to load receipt. Please try again.')
-      } else {
-        setReceipt(data as unknown as Receipt)
+      } else if (data) {
+        // Transform database columns to UI format
+        const transformed: Receipt = {
+          id: data.id,
+          vendor_name: data.vendor_name,
+          receipt_date: data.receipt_date,
+          currency: data.receipt_currency || 'USD',
+          subtotal_cents: data.subtotal ? Math.round(data.subtotal * 100) : null,
+          total_cents: data.total ? Math.round(data.total * 100) : null,
+          tip_cents: data.tip_amount ? Math.round(data.tip_amount * 100) : null,
+          image_url: data.image_url,
+          payer: data.payer,
+          line_items: (data.line_items || []).map((item: { id: string; description: string; amount: number; category: string | null; assignments: Assignment[] }) => ({
+            id: item.id,
+            description: item.description,
+            unit_price_cents: Math.round((item.amount || 0) * 100),
+            quantity: 1,
+            category: item.category,
+            assignments: item.assignments || [],
+          })),
+          tax_lines: (data.tax_lines || []).map((tax: { id: string; description: string; amount: number }) => ({
+            id: tax.id,
+            tax_type: tax.description || 'Tax',
+            amount_cents: Math.round((tax.amount || 0) * 100),
+          })),
+        }
+        setReceipt(transformed)
       }
     } catch {
       setError('Something went wrong. Please try again.')
@@ -190,6 +218,32 @@ export default function ReceiptDetail() {
     setIsSaving(false)
   }
 
+  const handlePayerUpdate = async (payerId: string) => {
+    if (!receipt) return
+
+    setIsSaving(true)
+
+    try {
+      const { error: updateError } = await supabase
+        .from('receipts')
+        .update({ payer_participant_id: payerId })
+        .eq('id', receipt.id)
+
+      if (updateError) {
+        console.error('Failed to update payer:', updateError)
+        setError('Failed to update payer. Please try again.')
+      } else {
+        await fetchReceipt()
+        setEditingPayer(false)
+        setSelectedPayerId(null)
+      }
+    } catch {
+      setError('Failed to update payer. Please try again.')
+    }
+
+    setIsSaving(false)
+  }
+
   if (isLoading) {
     return (
       <div className="space-y-4 sm:space-y-6">
@@ -275,7 +329,47 @@ export default function ReceiptDetail() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div>
             <label className="text-xs font-medium text-gray-500 uppercase">Paid By</label>
-            <p className="font-semibold text-gray-900">{getParticipantName(receipt.payer)}</p>
+            {editingPayer ? (
+              <div className="mt-1 space-y-2">
+                <ParticipantPicker
+                  tripId={tripId!}
+                  selectedParticipantIds={selectedPayerId ? [selectedPayerId] : (receipt.payer ? [receipt.payer.id] : [])}
+                  onChange={(ids) => setSelectedPayerId(ids[0] || null)}
+                  placeholder="Select payer..."
+                />
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => selectedPayerId && handlePayerUpdate(selectedPayerId)}
+                    disabled={!selectedPayerId || isSaving}
+                    className="text-sm bg-blue-600 text-white px-3 py-1.5 rounded hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {isSaving ? 'Saving...' : 'Save'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingPayer(false)
+                      setSelectedPayerId(null)
+                    }}
+                    className="text-sm text-gray-600 hover:text-gray-800 px-3 py-1.5"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <p className="font-semibold text-gray-900">{getParticipantName(receipt.payer)}</p>
+                <button
+                  type="button"
+                  onClick={() => setEditingPayer(true)}
+                  className="text-sm text-blue-600 hover:text-blue-800"
+                >
+                  Edit
+                </button>
+              </div>
+            )}
           </div>
           <div>
             <label className="text-xs font-medium text-gray-500 uppercase">Currency</label>

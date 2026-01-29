@@ -6,26 +6,27 @@ from datetime import date
 class LineItemParsed(BaseModel):
     """A parsed line item from a receipt."""
     description: str
-    amount: float
+    unit_price_cents: int
+    quantity: int = 1
     category: Optional[str] = None
 
 
 class TaxLineParsed(BaseModel):
     """A parsed tax line from a receipt."""
-    description: str
-    amount: float
+    tax_type: str
+    amount_cents: int
 
 
 class OCRResult(BaseModel):
     """Complete parsed result from OCR processing."""
-    vendor: Optional[str] = None
-    date: Optional[str] = None
+    vendor_name: Optional[str] = None
+    receipt_date: Optional[str] = None
     currency: Optional[str] = None
     line_items: list[LineItemParsed] = []
     tax_lines: list[TaxLineParsed] = []
-    subtotal: Optional[float] = None
-    total: Optional[float] = None
-    tip: Optional[float] = None
+    subtotal_cents: Optional[int] = None
+    total_cents: Optional[int] = None
+    tip_cents: Optional[int] = None
 
 
 class Balance(BaseModel):

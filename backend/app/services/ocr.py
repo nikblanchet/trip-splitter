@@ -103,11 +103,18 @@ async def parse_receipt_image(
         # If parsing fails, return empty result
         return OCRResult()
 
+    # Helper to convert dollars to cents
+    def to_cents(amount) -> int:
+        if amount is None:
+            return 0
+        return round(float(amount) * 100)
+
     # Convert to Pydantic models
     line_items = [
         LineItemParsed(
             description=item.get("description", ""),
-            amount=float(item.get("amount", 0)),
+            unit_price_cents=to_cents(item.get("amount")),
+            quantity=1,
             category=item.get("category")
         )
         for item in data.get("line_items", [])
@@ -115,19 +122,19 @@ async def parse_receipt_image(
 
     tax_lines = [
         TaxLineParsed(
-            description=tax.get("description", ""),
-            amount=float(tax.get("amount", 0))
+            tax_type=tax.get("description", "Tax"),
+            amount_cents=to_cents(tax.get("amount"))
         )
         for tax in data.get("tax_lines", [])
     ]
 
     return OCRResult(
-        vendor=data.get("vendor"),
-        date=data.get("date"),
+        vendor_name=data.get("vendor"),
+        receipt_date=data.get("date"),
         currency=data.get("currency"),
         line_items=line_items,
         tax_lines=tax_lines,
-        subtotal=float(data["subtotal"]) if data.get("subtotal") is not None else None,
-        total=float(data["total"]) if data.get("total") is not None else None,
-        tip=float(data["tip"]) if data.get("tip") is not None else None,
+        subtotal_cents=to_cents(data.get("subtotal")) if data.get("subtotal") is not None else None,
+        total_cents=to_cents(data.get("total")) if data.get("total") is not None else None,
+        tip_cents=to_cents(data.get("tip")) if data.get("tip") is not None else None,
     )

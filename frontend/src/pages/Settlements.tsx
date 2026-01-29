@@ -75,11 +75,23 @@ export default function Settlements() {
     if (!tripId) return
 
     try {
-      // Fetch participants with their primary alias
+      // First get the trip UUID from the invite code
+      const { data: tripData, error: tripError } = await supabase
+        .from('trips')
+        .select('id')
+        .eq('invite_code', tripId)
+        .single()
+
+      if (tripError || !tripData) {
+        console.error('Error fetching trip:', tripError)
+        return
+      }
+
+      // Fetch participants with their primary alias using trip UUID
       const { data, error: fetchError } = await supabase
         .from('participants_display')
         .select('id, primary_alias')
-        .eq('trip_id', tripId)
+        .eq('trip_id', tripData.id)
 
       if (fetchError) {
         console.error('Error fetching participants:', fetchError)
@@ -103,10 +115,11 @@ export default function Settlements() {
     if (!tripId) return
 
     try {
+      // tripId from URL is the invite_code, not the UUID
       const { data, error: fetchError } = await supabase
         .from('trips')
         .select('id, base_currency')
-        .eq('id', tripId)
+        .eq('invite_code', tripId)
         .single()
 
       if (fetchError) {
@@ -121,9 +134,10 @@ export default function Settlements() {
   }, [tripId])
 
   const fetchDirectPayments = useCallback(async () => {
-    if (!tripId) return
+    if (!tripId || !trip) return
 
     try {
+      // Use the trip UUID (trip.id), not the invite code (tripId)
       const { data, error: fetchError } = await supabase
         .from('active_direct_payments')
         .select(`
@@ -144,7 +158,7 @@ export default function Settlements() {
             participant_aliases(alias, is_primary)
           )
         `)
-        .eq('trip_id', tripId)
+        .eq('trip_id', trip.id)
         .order('payment_date', { ascending: false })
 
       if (fetchError) {
@@ -152,7 +166,7 @@ export default function Settlements() {
         const { data: simpleData, error: simpleError } = await supabase
           .from('active_direct_payments')
           .select('*')
-          .eq('trip_id', tripId)
+          .eq('trip_id', trip.id)
           .order('payment_date', { ascending: false })
 
         if (!simpleError && simpleData) {
@@ -193,7 +207,7 @@ export default function Settlements() {
     } catch {
       console.error('Error fetching direct payments')
     }
-  }, [tripId, participantMap])
+  }, [tripId, trip, participantMap])
 
   const fetchData = useCallback(async () => {
     if (!tripId) return
@@ -222,11 +236,11 @@ export default function Settlements() {
   }, [fetchData])
 
   useEffect(() => {
-    // Fetch direct payments after participant map is populated
-    if (Object.keys(participantMap).length > 0) {
+    // Fetch direct payments after participant map is populated and trip is loaded
+    if (Object.keys(participantMap).length > 0 && trip) {
       fetchDirectPayments()
     }
-  }, [participantMap, fetchDirectPayments])
+  }, [participantMap, trip, fetchDirectPayments])
 
   const handleDeletePayment = async (paymentId: string) => {
     if (!confirm('Are you sure you want to delete this payment?')) {
@@ -442,7 +456,7 @@ export default function Settlements() {
 
       {/* Record Payment Modal */}
       <RecordPaymentModal
-        tripId={tripId || ''}
+        tripId={trip?.id || ''}
         participants={participants}
         baseCurrency={baseCurrency}
         isOpen={showPaymentModal}

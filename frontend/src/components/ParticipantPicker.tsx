@@ -52,8 +52,9 @@ export default function ParticipantPicker({
 
         if (!tripData) return
 
+        // Use participants_display view which has the primary_alias column
         const { data } = await supabase
-          .from('participants')
+          .from('participants_display')
           .select('id, primary_alias')
           .eq('trip_id', tripData.id)
           .in('id', selectedParticipantIds)
@@ -96,17 +97,18 @@ export default function ParticipantPicker({
         }
 
         // Search aliases with participant data
+        // Join with participants_display view to get primary_alias
         const { data, error } = await supabase
           .from('participant_aliases')
           .select(`
             id,
             alias,
             is_primary,
-            participant:participants!inner(id, primary_alias, trip_id, deleted_at)
+            participant:participants_display!inner(id, primary_alias, trip_id, deleted_at)
           `)
           .ilike('alias', `%${searchTerm}%`)
-          .eq('participants.trip_id', tripData.id)
-          .is('participants.deleted_at', null)
+          .eq('participants_display.trip_id', tripData.id)
+          .is('participants_display.deleted_at', null)
           .limit(10)
 
         if (error) {

@@ -50,10 +50,10 @@ export default function ReceiptList() {
           id,
           vendor_name,
           receipt_date,
-          currency,
-          subtotal_cents,
-          total_cents,
-          tip_cents,
+          receipt_currency,
+          subtotal,
+          total,
+          tip_amount,
           payer:participants!receipts_payer_participant_id_fkey(
             id,
             participant_aliases(alias, is_primary)
@@ -65,7 +65,18 @@ export default function ReceiptList() {
       if (fetchError) {
         setError('Unable to load receipts. Please try again.')
       } else {
-        setReceipts(data || [])
+        // Transform database columns to UI format
+        const transformed = (data || []).map((r: { id: string; vendor_name: string | null; receipt_date: string | null; receipt_currency: string; subtotal: number | null; total: number | null; tip_amount: number | null; payer: Receipt['payer'] }) => ({
+          id: r.id,
+          vendor_name: r.vendor_name,
+          receipt_date: r.receipt_date,
+          currency: r.receipt_currency || 'USD',
+          subtotal_cents: r.subtotal ? Math.round(r.subtotal * 100) : null,
+          total_cents: r.total ? Math.round(r.total * 100) : null,
+          tip_cents: r.tip_amount ? Math.round(r.tip_amount * 100) : null,
+          payer: r.payer,
+        }))
+        setReceipts(transformed)
       }
     } catch {
       setError('Something went wrong. Please try again.')

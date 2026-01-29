@@ -3,19 +3,26 @@ import { supabase } from '../lib/supabase'
 import Spinner from './Spinner'
 import AvatarUpload from './AvatarUpload'
 
-interface AddParticipantModalProps {
-  tripId: string
+interface EditParticipantModalProps {
+  participant: {
+    id: string
+    trip_id: string
+    primary_alias: string
+    venmo_handle: string | null
+    avatar_url: string | null
+    all_aliases: string[]
+  }
   isOpen: boolean
   onClose: () => void
-  onParticipantAdded: () => void
+  onParticipantUpdated: () => void
 }
 
-export default function AddParticipantModal({
-  tripId,
+export default function EditParticipantModal({
+  participant,
   isOpen,
   onClose,
-  onParticipantAdded,
-}: AddParticipantModalProps) {
+  onParticipantUpdated,
+}: EditParticipantModalProps) {
   const [primaryName, setPrimaryName] = useState('')
   const [aliases, setAliases] = useState<string[]>([])
   const [newAlias, setNewAlias] = useState('')
@@ -24,31 +31,23 @@ export default function AddParticipantModal({
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [nameError, setNameError] = useState<string | null>(null)
-  const [tripUuid, setTripUuid] = useState<string | null>(null)
   const modalRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (isOpen) {
-      setPrimaryName('')
-      setAliases([])
+    if (isOpen && participant) {
+      setPrimaryName(participant.primary_alias || '')
+      setAliases(
+        (participant.all_aliases || []).filter(
+          (alias) => alias !== participant.primary_alias
+        )
+      )
       setNewAlias('')
-      setVenmoHandle('')
-      setAvatarUrl(null)
+      setVenmoHandle(participant.venmo_handle || '')
+      setAvatarUrl(participant.avatar_url)
       setError(null)
       setNameError(null)
-
-      // Fetch trip UUID for avatar uploads
-      const fetchTripUuid = async () => {
-        const { data } = await supabase
-          .from('trips')
-          .select('id')
-          .eq('invite_code', tripId)
-          .single()
-        if (data) setTripUuid(data.id)
-      }
-      fetchTripUuid()
     }
-  }, [isOpen, tripId])
+  }, [isOpen, participant])
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -71,7 +70,7 @@ export default function AddParticipantModal({
 
   const addAlias = () => {
     const trimmed = newAlias.trim()
-    if (trimmed && !aliases.includes(trimmed)) {
+    if (trimmed && !aliases.includes(trimmed) && trimmed !== primaryName) {
       setAliases([...aliases, trimmed])
       setNewAlias('')
     }
@@ -84,7 +83,6 @@ export default function AddParticipantModal({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    // Validate
     const trimmedName = primaryName.trim()
     if (!trimmedName) {
       setNameError('Please enter a name')
@@ -100,41 +98,28 @@ export default function AddParticipantModal({
     setError(null)
 
     try {
-      // First, get the trip UUID from the invite code
-      const { data: tripData, error: tripError } = await supabase
-        .from('trips')
-        .select('id')
-        .eq('invite_code', tripId)
-        .single()
-
-      if (tripError || !tripData) {
-        setError('Could not find trip. Please try again.')
-        setIsSubmitting(false)
-        return
-      }
-
-      // Insert participant (primary_alias is computed via participant_aliases table)
-      const { data: participant, error: participantError } = await supabase
+      // Update participant
+      const { error: updateError } = await supabase
         .from('participants')
-        .insert({
-          trip_id: tripData.id,
+        .update({
           venmo_handle: venmoHandle.trim() || null,
           avatar_url: avatarUrl,
         })
-        .select()
-        .single()
+        .eq('id', participant.id)
 
-      if (participantError) {
-        if (participantError.message.includes('duplicate') || participantError.message.includes('unique')) {
-          setError('A participant with this name already exists.')
-        } else {
-          setError('Unable to add participant. Please try again.')
-        }
+      if (updateError) {
+        setError('Unable to update participant. Please try again.')
         setIsSubmitting(false)
         return
       }
 
-      // Insert primary alias
+      // Delete existing aliases
+      await supabase
+        .from('participant_aliases')
+        .delete()
+        .eq('participant_id', participant.id)
+
+      // Insert new aliases
       const aliasesToInsert = [
         { participant_id: participant.id, alias: trimmedName, is_primary: true },
         ...aliases.map((alias) => ({
@@ -149,13 +134,13 @@ export default function AddParticipantModal({
         .insert(aliasesToInsert)
 
       if (aliasError) {
-        setError('Participant added but some aliases could not be saved.')
+        setError('Participant updated but some aliases could not be saved.')
         setIsSubmitting(false)
         return
       }
 
       setIsSubmitting(false)
-      onParticipantAdded()
+      onParticipantUpdated()
       onClose()
     } catch {
       setError('Something went wrong. Please try again.')
@@ -176,7 +161,7 @@ export default function AddParticipantModal({
       >
         <div className="p-4 sm:p-6 space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold text-gray-900">Add Participant</h2>
+            <h2 className="text-xl font-semibold text-gray-900">Edit Participant</h2>
             <button
               onClick={onClose}
               className="text-gray-400 hover:text-gray-600 p-2 -mr-2 min-w-[44px] min-h-[44px] flex items-center justify-center"
@@ -199,18 +184,17 @@ export default function AddParticipantModal({
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {tripUuid && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Photo
-                </label>
-                <AvatarUpload
-                  currentAvatarUrl={avatarUrl}
-                  onAvatarChange={setAvatarUrl}
-                  tripId={tripUuid}
-                />
-              </div>
-            )}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Photo
+              </label>
+              <AvatarUpload
+                currentAvatarUrl={avatarUrl}
+                onAvatarChange={setAvatarUrl}
+                tripId={participant.trip_id}
+                participantId={participant.id}
+              />
+            </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -227,10 +211,9 @@ export default function AddParticipantModal({
                 className={`w-full border rounded-lg px-4 py-3 focus:outline-none focus:ring-2 text-base min-h-[44px] ${
                   nameError ? 'border-red-300 focus:ring-red-500' : 'border-gray-300 focus:ring-blue-500'
                 }`}
-                aria-describedby={nameError ? 'name-error' : undefined}
               />
               {nameError && (
-                <p id="name-error" className="mt-1 text-sm text-red-600">{nameError}</p>
+                <p className="mt-1 text-sm text-red-600">{nameError}</p>
               )}
             </div>
 
@@ -314,7 +297,7 @@ export default function AddParticipantModal({
                 className="flex-1 bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed min-h-[44px] flex items-center justify-center gap-2 order-1 sm:order-2"
               >
                 {isSubmitting && <Spinner size="sm" />}
-                {isSubmitting ? 'Adding...' : 'Add Participant'}
+                {isSubmitting ? 'Saving...' : 'Save Changes'}
               </button>
             </div>
           </form>

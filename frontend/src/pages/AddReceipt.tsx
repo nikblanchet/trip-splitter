@@ -180,12 +180,6 @@ export default function AddReceipt() {
       return
     }
 
-    // Validate payer
-    if (!payerId) {
-      setPayerError('Please select who paid for this receipt')
-      setError('Please select who paid for this receipt')
-      return
-    }
     setPayerError(null)
 
     if (lineItems.length === 0 || !lineItems.some((item) => item.description)) {
@@ -220,13 +214,13 @@ export default function AddReceipt() {
         .from('receipts')
         .insert({
           trip_id: tripUuid,
-          payer_participant_id: payerId,
+          payer_participant_id: payerId || null,
           vendor_name: vendorName || null,
           receipt_date: receiptDate || null,
-          currency,
-          subtotal_cents: subtotalCents || calculateSubtotal(),
-          total_cents: totalCents || calculateTotal(),
-          tip_cents: tipCents || null,
+          receipt_currency: currency,
+          subtotal: (subtotalCents || calculateSubtotal()) / 100,
+          total: (totalCents || calculateTotal()) / 100,
+          tip_amount: tipCents ? tipCents / 100 : null,
           image_url: imageUrl,
         })
         .select()
@@ -236,15 +230,16 @@ export default function AddReceipt() {
         throw receiptError
       }
 
-      // Insert line items
+      // Insert line items (database only allows: food, alcohol, other)
+      const validCategories = ['food', 'alcohol', 'other']
       const lineItemsToInsert = lineItems
         .filter((item) => item.description)
-        .map((item) => ({
+        .map((item, index) => ({
           receipt_id: receipt.id,
           description: item.description,
-          unit_price_cents: item.unit_price_cents,
-          quantity: item.quantity,
-          category: item.category,
+          amount: (item.unit_price_cents * item.quantity) / 100,
+          category: item.category && validCategories.includes(item.category) ? item.category : 'other',
+          sort_order: index,
         }))
 
       if (lineItemsToInsert.length > 0) {
@@ -258,8 +253,8 @@ export default function AddReceipt() {
       if (taxLines.length > 0) {
         const taxLinesToInsert = taxLines.map((tax) => ({
           receipt_id: receipt.id,
-          tax_type: tax.tax_type,
-          amount_cents: tax.amount_cents,
+          description: tax.tax_type,
+          amount: tax.amount_cents / 100,
         }))
 
         const { error: taxError } = await supabase.from('tax_lines').insert(taxLinesToInsert)
@@ -424,7 +419,7 @@ export default function AddReceipt() {
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Paid By <span className="text-red-500">*</span>
+              Paid By
             </label>
             {tripId && (
               <div>
