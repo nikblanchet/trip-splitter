@@ -111,28 +111,6 @@ export default function Settlements() {
     }
   }, [tripId])
 
-  const fetchTrip = useCallback(async () => {
-    if (!tripId) return
-
-    try {
-      // tripId from URL is the invite_code, not the UUID
-      const { data, error: fetchError } = await supabase
-        .from('trips')
-        .select('id, base_currency')
-        .eq('invite_code', tripId)
-        .single()
-
-      if (fetchError) {
-        console.error('Error fetching trip:', fetchError)
-        return
-      }
-
-      setTrip(data)
-    } catch {
-      console.error('Error fetching trip')
-    }
-  }, [tripId])
-
   const fetchDirectPayments = useCallback(async () => {
     if (!tripId || !trip) return
 

@@ -40,27 +40,6 @@ function gcdArray(arr: number[]): number {
   return arr.reduce((acc, val) => gcd(acc, val), arr[0])
 }
 
-// Format currency amount
-function formatAmount(cents: number, currency: string): string {
-  const symbols: Record<string, string> = {
-    USD: '$',
-    MXN: '$',
-    EUR: '\u20AC',
-    GBP: '\u00A3',
-    CAD: '$',
-    AUD: '$',
-    CHF: 'CHF ',
-  }
-  const symbol = symbols[currency] || currency + ' '
-  const amount = (cents / 100).toFixed(2)
-
-  // Add currency code for ambiguous currencies
-  if (currency === 'MXN' || currency === 'CAD' || currency === 'AUD') {
-    return `${symbol}${amount} ${currency}`
-  }
-  return `${symbol}${amount}`
-}
-
 export default function SplitEditor({
   assignments,
   itemAmountCents,
