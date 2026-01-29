@@ -156,13 +156,13 @@ export default function SplitEditor({
   }
 
   return (
-    <div className="space-y-2">
+    <div className="w-full space-y-2">
       {/* Header row */}
-      <div className="flex items-center gap-2 text-xs font-medium text-gray-500">
+      <div className="flex items-center gap-3 text-xs font-medium text-gray-500">
         <div className="flex-1 min-w-0">Person</div>
-        <div className="w-12 text-center">Ratio</div>
-        <div className="w-20 text-right">Amount</div>
-        <div className="w-6"></div>
+        <div className="w-16 text-center">Ratio</div>
+        <div className="w-24 text-right">{currency}</div>
+        <div className="w-8"></div>
       </div>
 
       {/* Data rows */}
@@ -173,7 +173,7 @@ export default function SplitEditor({
         return (
           <div
             key={assignment.participant_id}
-            className="flex items-center gap-2"
+            className="flex items-center gap-3"
           >
             {/* Person name */}
             <div className="flex-1 min-w-0 text-sm text-gray-900 truncate">
@@ -187,52 +187,45 @@ export default function SplitEditor({
               value={assignment.shares}
               onChange={(e) => handleRatioChange(assignment.participant_id, e.target.value)}
               disabled={disabled}
-              className="w-12 text-center border border-gray-300 rounded px-1 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+              className="w-16 text-center border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
             />
 
-            {/* Amount input with currency */}
-            <div className="w-20 relative">
-              <input
-                type="number"
-                step="0.01"
-                value={displayAmount}
-                onChange={(e) => handleAmountInput(assignment.participant_id, e.target.value)}
-                onBlur={() => handleAmountBlur(assignment.participant_id)}
-                disabled={disabled}
-                className="w-full text-right border border-gray-300 rounded px-1 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 pr-1"
-              />
-            </div>
+            {/* Amount input */}
+            <input
+              type="number"
+              step="0.01"
+              value={displayAmount}
+              onChange={(e) => handleAmountInput(assignment.participant_id, e.target.value)}
+              onBlur={() => handleAmountBlur(assignment.participant_id)}
+              disabled={disabled}
+              className="w-24 text-right border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+            />
 
             {/* Remove button */}
             {!disabled ? (
               <button
                 type="button"
                 onClick={() => onRemove(assignment.participant_id)}
-                className="w-6 text-red-400 hover:text-red-600 flex items-center justify-center"
+                className="w-8 h-8 text-red-400 hover:text-red-600 flex items-center justify-center"
                 title="Remove"
               >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             ) : (
-              <div className="w-6"></div>
+              <div className="w-8"></div>
             )}
           </div>
         )
       })}
-
-      {/* Currency label */}
-      <div className="text-xs text-gray-400 text-right pr-8">
-        {currency}
-      </div>
 
       {/* Add button */}
       {!disabled && (
         <button
           type="button"
           onClick={onAddClick}
-          className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800"
+          className="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800 py-1"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
