@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { calculatePerPersonBreakdown } from '../lib/calculations'
 import LineItemCard from '../components/LineItemCard'
 import Spinner from '../components/Spinner'
 
@@ -53,14 +54,7 @@ interface Receipt {
   tax_lines: TaxLine[]
 }
 
-interface PerPersonBreakdown {
-  participantId: string
-  participantName: string
-  itemsTotal: number
-  taxShare: number
-  tipShare: number
-  total: number
-}
+// PerPersonBreakdown type is imported from '../lib/calculations'
 
 export default function ReceiptDetail() {
   const { tripId, receiptId } = useParams()
@@ -135,60 +129,26 @@ export default function ReceiptDetail() {
     })
   }
 
-  // Calculate per-person breakdown
-  const calculatePerPersonBreakdown = useCallback((): PerPersonBreakdown[] => {
+  // Calculate per-person breakdown using the extracted utility function
+  const perPersonBreakdown = useMemo(() => {
     if (!receipt) return []
 
-    const breakdown = new Map<string, PerPersonBreakdown>()
+    // Transform receipt data to the format expected by calculatePerPersonBreakdown
+    const receiptData = {
+      line_items: receipt.line_items.map((item) => ({
+        unit_price_cents: item.unit_price_cents,
+        quantity: item.quantity,
+        assignments: item.assignments.map((a) => ({
+          participant_id: a.participant_id,
+          participant_name: getParticipantName(a.participant as unknown as Participant),
+          shares: a.shares,
+        })),
+      })),
+      tax_lines: receipt.tax_lines.map((t) => ({ amount_cents: t.amount_cents })),
+      tip_cents: receipt.tip_cents,
+    }
 
-    // Calculate total shares across all items to prorate tax and tip
-    let totalAssignedAmount = 0
-    const participantItemTotals = new Map<string, number>()
-
-    receipt.line_items.forEach((item) => {
-      const itemTotal = item.unit_price_cents * item.quantity
-      const totalShares = item.assignments.reduce((sum, a) => sum + a.shares, 0)
-
-      if (totalShares > 0) {
-        item.assignments.forEach((assignment) => {
-          const participantShare = (itemTotal * assignment.shares) / totalShares
-          const current = participantItemTotals.get(assignment.participant_id) || 0
-          participantItemTotals.set(assignment.participant_id, current + participantShare)
-          totalAssignedAmount += participantShare
-
-          // Initialize breakdown entry
-          if (!breakdown.has(assignment.participant_id)) {
-            breakdown.set(assignment.participant_id, {
-              participantId: assignment.participant_id,
-              participantName: getParticipantName(assignment.participant as unknown as Participant),
-              itemsTotal: 0,
-              taxShare: 0,
-              tipShare: 0,
-              total: 0,
-            })
-          }
-
-          const entry = breakdown.get(assignment.participant_id)!
-          entry.itemsTotal += participantShare
-        })
-      }
-    })
-
-    // Calculate tax and tip total
-    const taxTotal = receipt.tax_lines.reduce((sum, tax) => sum + tax.amount_cents, 0)
-    const tipTotal = receipt.tip_cents || 0
-
-    // Prorate tax and tip based on items share
-    breakdown.forEach((entry, participantId) => {
-      const itemsShare = participantItemTotals.get(participantId) || 0
-      if (totalAssignedAmount > 0) {
-        entry.taxShare = (taxTotal * itemsShare) / totalAssignedAmount
-        entry.tipShare = (tipTotal * itemsShare) / totalAssignedAmount
-      }
-      entry.total = entry.itemsTotal + entry.taxShare + entry.tipShare
-    })
-
-    return Array.from(breakdown.values()).sort((a, b) => b.total - a.total)
+    return calculatePerPersonBreakdown(receiptData)
   }, [receipt])
 
   const handleAssignmentChange = async (
@@ -276,7 +236,6 @@ export default function ReceiptDetail() {
     )
   }
 
-  const perPersonBreakdown = calculatePerPersonBreakdown()
   const hasUnassignedItems = receipt.line_items.some((item) => item.assignments.length === 0)
 
   return (
